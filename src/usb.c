@@ -390,6 +390,39 @@ static struct usb_device* find_device(int bus, int address)
 	return NULL;
 }
 
+/* Configuration numbers and interface counts vary between devices. A capture
+ * configuration must provide both Valeria and the USB multiplexor. */
+static int find_valeria_configuration(struct libusb_device *dev)
+{
+	struct libusb_device_descriptor desc;
+	if(libusb_get_device_descriptor(dev, &desc) != 0)
+		return 0;
+
+	for(int i = 0; i < desc.bNumConfigurations; i++) {
+		struct libusb_config_descriptor *config;
+		if(libusb_get_config_descriptor(dev, i, &config) != 0)
+			continue;
+		int has_valeria = 0, has_usbmux = 0;
+		for(int j = 0; j < config->bNumInterfaces; j++) {
+			for(int k = 0; k < config->interface[j].num_altsetting; k++) {
+				const struct libusb_interface_descriptor *intf = &config->interface[j].altsetting[k];
+				if(intf->bInterfaceClass == INTERFACE_CLASS &&
+				   intf->bInterfaceSubClass == 0x2a && intf->bInterfaceProtocol == 0xff)
+					has_valeria = 1;
+				if(intf->bInterfaceClass == INTERFACE_CLASS &&
+				   intf->bInterfaceSubClass == INTERFACE_SUBCLASS &&
+				   intf->bInterfaceProtocol == INTERFACE_PROTOCOL)
+					has_usbmux = 1;
+			}
+		}
+		int value = config->bConfigurationValue;
+		libusb_free_config_descriptor(config);
+		if(has_valeria && has_usbmux)
+			return value;
+	}
+	return 0;
+}
+
 /// @brief guess the current mode
 /// @param dev 
 /// @param usbdev 
@@ -403,6 +436,9 @@ static int guess_mode(struct libusb_device* dev, struct usb_device *usbdev)
 	struct libusb_config_descriptor *config;
 	int bus = usbdev->bus;
 	int address = usbdev->address;
+
+	if(find_valeria_configuration(dev))
+		return 2;
 
 	if(devdesc.bNumConfigurations == 1) {
 		// CDC-NCM Direct
@@ -475,21 +511,34 @@ static int set_valid_configuration(struct libusb_device* dev, struct usb_device 
 	int bus = usbdev->bus;
 	int address = usbdev->address;
 	int current_config = 0;
+	int valeria_config = find_valeria_configuration(dev);
 
 	if((res = libusb_get_configuration(handle, &current_config)) != 0) {
 		usbmuxd_log(LL_WARNING, "Could not get current configuration for device %d-%d: %s", bus, address, libusb_error_name(res));
 		return -1;
 	}
 
-	for(j = devdesc.bNumConfigurations ; j > 0  ; j--) {
-		if((res = libusb_get_config_descriptor_by_value(dev, j, &config)) != 0) {
-			usbmuxd_log(LL_NOTICE, "Could not get configuration %i descriptor for device %i-%i: %s", j, bus, address, libusb_error_name(res));
+	/* Prefer the capture configuration without disturbing its AV interface.
+	 * Fall back to upstream's reverse descriptor order for ordinary devices. */
+	for(j = devdesc.bNumConfigurations ; j >= 0 ; j--) {
+		found = 0;
+		if(j == devdesc.bNumConfigurations) {
+			if(!valeria_config)
+				continue;
+			res = libusb_get_config_descriptor_by_value(dev, valeria_config, &config);
+		} else {
+			res = libusb_get_config_descriptor(dev, j, &config);
+		}
+		if(res != 0) {
+			usbmuxd_log(LL_NOTICE, "Could not get configuration descriptor for device %i-%i: %s", bus, address, libusb_error_name(res));
 			continue;
 		}
 		for(k = 0 ; k < config->bNumInterfaces ; k++) {
+			if(config->interface[k].num_altsetting == 0)
+				continue;
 			intf = &config->interface[k].altsetting[0];
-			if(intf->bInterfaceClass == INTERFACE_CLASS || 
-			   intf->bInterfaceSubClass == INTERFACE_SUBCLASS || 
+			if(intf->bInterfaceClass == INTERFACE_CLASS &&
+			   intf->bInterfaceSubClass == INTERFACE_SUBCLASS &&
 			   intf->bInterfaceProtocol == INTERFACE_PROTOCOL) {
 				usbmuxd_log(LL_NOTICE, "Found usbmux interface for device %i-%i: %i", bus, address, intf->bInterfaceNumber);
 				if(intf->bNumEndpoints != 2) {
@@ -541,8 +590,9 @@ static int set_valid_configuration(struct libusb_device* dev, struct usb_device 
 					}
 				}
 			}
-			if((res = libusb_set_configuration(handle, j)) != 0) {
-				usbmuxd_log(LL_WARNING, "Could not set configuration %d for device %d-%d: %s", j, bus, address, libusb_error_name(res));
+			if((res = libusb_set_configuration(handle, config->bConfigurationValue)) != 0) {
+				usbmuxd_log(LL_WARNING, "Could not set configuration %d for device %d-%d: %s", config->bConfigurationValue, bus, address, libusb_error_name(res));
+				found = 0;
 				libusb_free_config_descriptor(config);
 				continue;
 			}
@@ -706,6 +756,10 @@ static void get_mode_cb(struct libusb_transfer* transfer)
 	char* desired_mode_char = getenv(ENV_DEVICE_MODE);
 	int desired_mode = desired_mode_char ? atoi(desired_mode_char) : 1;
 	int guessed_mode = guess_mode(context->dev, dev);
+	/* Respect an explicit mode override, but do not undo capture mode enabled
+	 * by another application when using the default policy. */
+	if(!desired_mode_char && guessed_mode == 2)
+		desired_mode = 2;
 
 	// Response is 3:3:3:0 for initial mode, 5:3:3:0 otherwise.
 	usbmuxd_log(LL_INFO, "Received response %i:%i:%i:%i for get_mode request for device %i-%i", data[0], data[1], data[2], data[3], context->bus, context->address);

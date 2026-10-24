@@ -113,6 +113,21 @@ usbmuxd --help
 man usbmuxd
 ```
 
+### Native USB screen capture (Valeria)
+
+This fork preserves an already enabled Apple native screen-capture mode by
+default. It finds configurations containing both the USBMux (`ff/fe/02`) and
+Valeria (`ff/2a/ff`) interfaces by descriptor, including devices with additional
+network interfaces or different configuration numbers. It selects that
+configuration and claims only the USBMux interface, leaving AV access to the
+capture application.
+
+An explicit `USBMUXD_DEFAULT_DEVICE_MODE` environment variable still overrides
+the default mode policy. Setting it to `2` requests Valeria mode; leaving it
+unset preserves Valeria when another application has enabled it, while keeping
+the upstream default for other modes. This daemon does not implement the AV
+protocol or capture video itself.
+
 ## Contributing
 
 We welcome contributions from anyone and are grateful for every pull request!
