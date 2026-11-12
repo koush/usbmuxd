@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+if [ "$1" = configure ]; then
+    if ! getent passwd usbmux >/dev/null; then
+        adduser --system --group --home /var/lib/lockdown --no-create-home usbmux
+    fi
+    install -d -o usbmux -g "$(id -gn usbmux)" -m 0755 /var/lib/lockdown
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm control --reload-rules || true
+    fi
+fi
+#DEBHELPER#

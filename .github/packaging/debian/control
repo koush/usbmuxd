@@ -1,0 +1,16 @@
+Source: usbmuxd
+Section: utils
+Priority: optional
+Maintainer: Vysor <support@vysor.io>
+Build-Depends: debhelper-compat (= 13), autoconf, automake, libtool, pkg-config, libusb-1.0-0-dev, libplist-dev (>= 2.6.0), libimobiledevice-dev (>= 1.3.0), libimobiledevice-glue-dev
+Standards-Version: 4.7.0
+Homepage: https://github.com/koush/usbmuxd
+Rules-Requires-Root: no
+
+Package: usbmuxd
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, adduser
+Provides: vysor-usbmuxd
+Description: USB multiplexor daemon with Vysor native capture support
+ Replacement usbmuxd preserving Apple Valeria screen-capture configurations
+ alongside ordinary USBMux connections.

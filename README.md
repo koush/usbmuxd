@@ -115,6 +115,11 @@ man usbmuxd
 
 ### Native USB screen capture (Valeria)
 
+Debian packages and the unsigned GitHub Pages APT repository are built by the
+[release workflow](.github/workflows/release.yml). See the
+[packaging instructions](.github/packaging/README.md) for supported systems,
+publishing, and installation.
+
 This fork preserves an already enabled Apple native screen-capture mode by
 default. It finds configurations containing both the USBMux (`ff/fe/02`) and
 Valeria (`ff/2a/ff`) interfaces by descriptor, including devices with additional

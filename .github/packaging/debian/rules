@@ -1,0 +1,10 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+
+override_dh_auto_configure:
+	dh_auto_configure -- --prefix=/usr --localstatedir=/var --runstatedir=/run --with-systemdsystemunitdir=/usr/lib/systemd/system --with-udevrulesdir=/usr/lib/udev/rules.d
+
+# usbmuxd is activated by device events, not enabled at boot.
+override_dh_installsystemd:
+	dh_installsystemd --no-enable --no-start

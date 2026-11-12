@@ -1,0 +1,108 @@
+name: Debian release and APT repository
+
+on:
+  push:
+    tags: ['vysor-*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version, e.g. 1.1.1+vysor.1 (use a new version for every release)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Serialize publication so an older run cannot replace a newer APT index.
+concurrency:
+  group: usbmuxd-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: version
+        name: Validate version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          version="${INPUT_VERSION:-${GITHUB_REF_NAME#vysor-}}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+\+vysor\.[0-9]+$ ]]
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "tag=vysor-$version" >> "$GITHUB_OUTPUT"
+      - name: Build Debian 13 amd64 package
+        run: |
+          mkdir -p out
+          docker run --rm --platform linux/amd64 \
+            -e VERSION -v "$PWD:/src" -w /src debian:13 \
+            bash .github/packaging/build-deb.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debian-release
+          path: out/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: debian-release
+          path: out
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            if [[ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" == false ]]; then
+              # A retry after Pages failed must not mutate the existing release.
+              mkdir existing
+              gh release download "$TAG" --pattern SHA256SUMS --dir existing
+              cmp out/SHA256SUMS existing/SHA256SUMS
+              exit 0
+            fi
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --draft \
+              --title "usbmuxd $TAG" \
+              --notes "Vysor-patched usbmuxd for Debian 13 amd64. Source: $GITHUB_SHA. See the packaging README for unsigned APT installation instructions."
+          fi
+          gh release upload "$TAG" out/* --clobber
+          gh release edit "$TAG" --draft=false
+      - name: Collect all stable package releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p site/pool/main/u/usbmuxd
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.draft == false and .prerelease == false) | select(any(.assets[]; .name | endswith("+deb13_amd64.deb"))) | .tag_name' > releases.txt
+          while IFS= read -r tag; do
+            gh release download "$tag" --pattern '*+deb13_amd64.deb' \
+              --dir site/pool/main/u/usbmuxd
+          done < releases.txt
+      - name: Generate unsigned APT metadata
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-utils
+          bash .github/packaging/make-apt.sh site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
