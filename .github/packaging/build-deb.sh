@@ -38,6 +38,8 @@ usbmuxd --version
 ! ldd /usr/sbin/usbmuxd | grep 'not found'
 test -f /usr/lib/systemd/system/usbmuxd.service
 test -f /usr/lib/udev/rules.d/39-usbmuxd.rules
+test -f /usr/lib/udev/rules.d/70-usbmuxd.rules
+grep -F 'TAG+="uaccess"' /usr/lib/udev/rules.d/70-usbmuxd.rules
 getent passwd usbmux
 cd "$output_dir"
 sha256sum *.deb *_source.tar.gz > SHA256SUMS

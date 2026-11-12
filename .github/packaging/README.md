@@ -48,6 +48,10 @@ repository signature. No key installation is needed.
 
 You can also download a release `.deb` and run `sudo apt install ./usbmuxd_*.deb`.
 The package replaces the distro's `usbmuxd`; it preserves pairing records and uses
-udev/systemd activation. Reconnect the phone after installation to activate the
-daemon. A future higher-versioned distro package can supersede this fork; consumers
+udev/systemd activation. It also installs `70-usbmuxd.rules`, granting the active
+local desktop user raw USB access for Valeria capture through logind's `uaccess`
+mechanism. The rule leaves daemon ownership/activation intact and is removed with
+the package. It does not grant access to arbitrary SSH users. Reconnect the phone
+after installation to apply the permissions and activate the daemon.
+A future higher-versioned distro package can supersede this fork; consumers
 requiring the patches can depend on the virtual package `vysor-usbmuxd`.
